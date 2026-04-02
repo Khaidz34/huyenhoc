@@ -35,13 +35,19 @@ class DatabaseService {
                 username: url.username
             });
             
-            // Use connection string directly with SSL
+            // Use connection string directly with SSL and IPv4 preference
             this.pool = new Pool({
                 connectionString: DATABASE_URL,
                 ssl: { rejectUnauthorized: false },
                 max: 20,
                 idleTimeoutMillis: 30000,
                 connectionTimeoutMillis: 15000, // Increased timeout
+                // Force IPv4 to avoid IPv6 connectivity issues on some platforms
+                host: url.hostname.replace(/^db\./, ''), // Remove db. prefix if present
+                port: parseInt(url.port) || 5432,
+                database: url.pathname.slice(1),
+                user: url.username,
+                password: url.password,
             });
 
             // Test connection with retry logic
@@ -85,6 +91,10 @@ class DatabaseService {
                     if (error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
                         console.log('[DB] ⚠️  Connection timeout - Supabase project might be paused');
                         console.log('[DB] 💡 To fix: Go to Supabase Dashboard → Select project → Click "Restore" if paused');
+                    } else if (error.code === 'ENETUNREACH' || error.message.includes('ENETUNREACH')) {
+                        console.log('[DB] ⚠️  Network unreachable - Supabase project is likely paused or inactive');
+                        console.log('[DB] 💡 SOLUTION: Go to https://supabase.com/dashboard → Select your project → Click "Restore"');
+                        console.log('[DB] 💡 Your project auto-pauses after 1 week of inactivity on the free tier');
                     }
                     
                     if (retries > 0) {
@@ -106,6 +116,10 @@ class DatabaseService {
             if (error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
                 console.error('[DB] 🔧 SOLUTION: Your Supabase project might be paused (free tier auto-pauses after 1 week)');
                 console.error('[DB] 🔧 Go to https://supabase.com/dashboard → Select your project → Click "Restore"');
+            } else if (error.code === 'ENETUNREACH' || error.message.includes('ENETUNREACH')) {
+                console.error('[DB] 🔧 SOLUTION: Supabase project is paused or inactive');
+                console.error('[DB] 🔧 Go to https://supabase.com/dashboard → Select your project → Click "Restore"');
+                console.error('[DB] 🔧 Free tier projects auto-pause after 1 week of inactivity');
             } else if (error.message.includes('authentication failed')) {
                 console.error('[DB] 🔧 SOLUTION: Check your DATABASE_URL credentials');
             } else if (error.message.includes('does not exist')) {
