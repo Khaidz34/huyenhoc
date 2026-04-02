@@ -1,7 +1,7 @@
 services:
   # Backend Web Service
   - type: web
-    name: bazi-backend
+    name: huyenhoc
     runtime: node
     plan: standard
     
@@ -26,7 +26,7 @@ services:
       - key: OPENROUTER_API_KEY
         sync: false
       - key: CORS_ORIGIN
-        value: https://bazi-frontend.render.com,http://localhost:3005
+        value: https://thuatso.onrender.com,http://localhost:3005
       - key: LOG_LEVEL
         value: info
     
@@ -45,7 +45,7 @@ services:
 
   # Frontend Static Site
   - type: static_site
-    name: bazi-frontend
+    name: thuatso
     
     # Build configuration
     buildCommand: cd frontend && npm install && npm run build
@@ -54,7 +54,7 @@ services:
     # Environment variables
     envVars:
       - key: VITE_API_URL
-        value: https://bazi-backend.render.com
+        value: https://huyenhoc.onrender.com
       - key: VITE_APP_VERSION
         value: 2.1
       - key: VITE_ENABLE_AI_CONSULTANT
