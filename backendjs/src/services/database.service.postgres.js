@@ -28,7 +28,7 @@ class DatabaseService {
                 ssl: { rejectUnauthorized: false }, // Required for Supabase
                 max: 20, // Connection pool size
                 idleTimeoutMillis: 30000,
-                connectionTimeoutMillis: 2000,
+                connectionTimeoutMillis: 10000, // Increased to 10 seconds for Supabase
             });
 
             // Test connection
