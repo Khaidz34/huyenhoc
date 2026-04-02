@@ -23,34 +23,95 @@ class DatabaseService {
                 throw new Error('DATABASE_URL environment variable is required');
             }
 
-            // Parse connection details from DATABASE_URL
+            console.log('[DB] Initializing PostgreSQL connection...');
+
+            // Parse connection details from DATABASE_URL for logging
             const url = new URL(DATABASE_URL.replace('postgresql://', 'postgres://'));
             
+            console.log('[DB] Connecting to:', {
+                hostname: url.hostname,
+                port: url.port || '5432',
+                database: url.pathname.slice(1),
+                username: url.username
+            });
+            
+            // Use connection string directly with SSL
             this.pool = new Pool({
-                // Use explicit config instead of connectionString to force IPv4
-                host: 'aws-0-ap-southeast-1.pooler.supabase.com', // Pooler endpoint (IPv4 only)
-                port: 6543, // Pooler port
-                database: 'postgres',
-                user: 'postgres.mrquumgqbngcwjrtmtdu',
-                password: 'Chubedidaonay',
+                connectionString: DATABASE_URL,
                 ssl: { rejectUnauthorized: false },
                 max: 20,
                 idleTimeoutMillis: 30000,
-                connectionTimeoutMillis: 10000,
+                connectionTimeoutMillis: 15000, // Increased timeout
             });
 
-            // Test connection
-            const client = await this.pool.connect();
-            await client.query('SELECT NOW()');
-            client.release();
+            // Test connection with retry logic
+            let retries = 3;
+            let connected = false;
+            
+            while (retries > 0 && !connected) {
+                try {
+                    console.log(`[DB] Testing connection (attempt ${4 - retries}/3)...`);
+                    const client = await this.pool.connect();
+                    const result = await client.query('SELECT NOW() as current_time, version() as pg_version');
+                    client.release();
+                    
+                    console.log('[DB] ✅ Connected to PostgreSQL database successfully!');
+                    console.log('[DB] Current time:', result.rows[0].current_time);
+                    console.log('[DB] PostgreSQL version:', result.rows[0].pg_version.split(' ')[0]);
+                    console.log('[DB] Connection pool initialized with max 20 connections.');
+                    
+                    connected = true;
+                    
+                    // Test table existence
+                    try {
+                        const tables = await this.all(`
+                            SELECT table_name 
+                            FROM information_schema.tables 
+                            WHERE table_schema = 'public' 
+                            ORDER BY table_name
+                        `);
+                        console.log(`[DB] Found ${tables.length} tables in database`);
+                        if (tables.length > 0) {
+                            console.log('[DB] Available tables:', tables.map(t => t.table_name).join(', '));
+                        }
+                    } catch (tableError) {
+                        console.log('[DB] Could not list tables (this is normal for new databases)');
+                    }
+                    
+                } catch (error) {
+                    retries--;
+                    console.log(`[DB] Connection attempt failed: ${error.message}`);
+                    
+                    if (error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
+                        console.log('[DB] ⚠️  Connection timeout - Supabase project might be paused');
+                        console.log('[DB] 💡 To fix: Go to Supabase Dashboard → Select project → Click "Restore" if paused');
+                    }
+                    
+                    if (retries > 0) {
+                        console.log(`[DB] Retrying in 2 seconds... (${retries} attempts left)`);
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    }
+                }
+            }
+            
+            if (!connected) {
+                throw new Error('Failed to connect to database after 3 attempts. Please check if Supabase project is active.');
+            }
 
-            console.log('[DB] Connected to PostgreSQL database.');
-            console.log('[DB] Connection pool initialized with max 20 connections.');
-
-            // Schema already created by migration script, no need to create tables
             console.log('[DB] Database initialized successfully.');
         } catch (error) {
             console.error('[DB] Failed to initialize database:', error.message);
+            
+            // Provide helpful error messages based on error type
+            if (error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
+                console.error('[DB] 🔧 SOLUTION: Your Supabase project might be paused (free tier auto-pauses after 1 week)');
+                console.error('[DB] 🔧 Go to https://supabase.com/dashboard → Select your project → Click "Restore"');
+            } else if (error.message.includes('authentication failed')) {
+                console.error('[DB] 🔧 SOLUTION: Check your DATABASE_URL credentials');
+            } else if (error.message.includes('does not exist')) {
+                console.error('[DB] 🔧 SOLUTION: Database or table does not exist - run migration first');
+            }
+            
             throw error;
         }
     }
