@@ -14,8 +14,10 @@ const articlesRoutes = require('./src/routes/articles.routes');
 const queRoutes = require('./src/routes/que.routes');
 // const dailyRoutes = require('./src/routes/daily.routes');
 
-// Temporarily use SQLite until Supabase connection is fixed
-const dbService = require('./src/services/database.service');
+// Use PostgreSQL in production, SQLite in development
+const dbService = process.env.NODE_ENV === 'production'
+    ? require('./src/services/database.service.postgres')
+    : require('./src/services/database.service');
 
 const app = express();
 const PORT = process.env.PORT || 8888;
@@ -176,7 +178,7 @@ process.once('SIGUSR2', () => {
         app.listen(PORT, () => {
             console.log(`🚀 BaZi Mega-Evolution API running on port ${PORT}`);
             console.log(`📚 API Docs: http://localhost:${PORT}/api/docs`);
-            console.log(`💾 Database: SQLite (temporary - Supabase connection issue)`);
+            console.log(`💾 Database: ${process.env.NODE_ENV === 'production' ? 'PostgreSQL (Supabase)' : 'SQLite (Development)'}`);
 
             // Auto-cleanup old access logs (>30 days)
             dbService.cleanOldAccessLogs(30).catch(() => { });
