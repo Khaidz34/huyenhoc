@@ -23,18 +23,20 @@ class DatabaseService {
                 throw new Error('DATABASE_URL environment variable is required');
             }
 
+            // Parse connection details from DATABASE_URL
+            const url = new URL(DATABASE_URL.replace('postgresql://', 'postgres://'));
+            
             this.pool = new Pool({
-                connectionString: DATABASE_URL,
-                ssl: { rejectUnauthorized: false }, // Required for Supabase
-                max: 20, // Connection pool size
-                idleTimeoutMillis: 30000,
-                connectionTimeoutMillis: 10000, // Increased to 10 seconds for Supabase
-                // Force IPv4 to avoid IPv6 connection issues on Render
-                host: 'db.mrquumgqbngcwjrtmtdu.supabase.co',
-                port: 5432,
+                // Use explicit config instead of connectionString to force IPv4
+                host: 'aws-0-ap-southeast-1.pooler.supabase.com', // Pooler endpoint (IPv4 only)
+                port: 6543, // Pooler port
                 database: 'postgres',
-                user: 'postgres',
-                password: process.env.DATABASE_URL?.match(/:([^@]+)@/)?.[1] || '',
+                user: 'postgres.mrquumgqbngcwjrtmtdu',
+                password: 'Chubedidaonay',
+                ssl: { rejectUnauthorized: false },
+                max: 20,
+                idleTimeoutMillis: 30000,
+                connectionTimeoutMillis: 10000,
             });
 
             // Test connection
