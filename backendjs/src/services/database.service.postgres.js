@@ -29,6 +29,12 @@ class DatabaseService {
                 max: 20, // Connection pool size
                 idleTimeoutMillis: 30000,
                 connectionTimeoutMillis: 10000, // Increased to 10 seconds for Supabase
+                // Force IPv4 to avoid IPv6 connection issues on Render
+                host: 'db.mrquumgqbngcwjrtmtdu.supabase.co',
+                port: 5432,
+                database: 'postgres',
+                user: 'postgres',
+                password: process.env.DATABASE_URL?.match(/:([^@]+)@/)?.[1] || '',
             });
 
             // Test connection
