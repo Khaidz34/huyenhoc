@@ -1,50 +1,160 @@
 /**
  * SQLite Database Service using native sqlite3 driver
  * Optimized for performance with WAL mode and async operations
+ * Enhanced with connection pooling, error handling, and health monitoring
+ * Implements DatabaseServiceInterface
  */
 
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
+const DatabaseServiceInterface = require('./database.interface');
 
 // Database file path
 const DB_PATH = path.join(__dirname, '../../data/bazi_consultant.db');
 const DATA_DIR = path.dirname(DB_PATH);
 
-class DatabaseService {
+class SQLiteAdapter extends DatabaseServiceInterface {
     constructor() {
+        super(); // Call parent constructor
         this.db = null;
+        this.isInitialized = false;
+        this.connectionRetries = 0;
+        this.maxRetries = 3;
+        this.retryDelay = 1000; // 1 second
+        this.healthStatus = 'unknown';
+        this.lastHealthCheck = null;
     }
 
     /**
-     * Initialize database connection
+     * Initialize database connection with retry mechanism
      */
     async init() {
+        if (this.isInitialized && this.db) {
+            return Promise.resolve();
+        }
+
         return new Promise((resolve, reject) => {
-            // Ensure directory exists
-            if (!fs.existsSync(DATA_DIR)) {
-                fs.mkdirSync(DATA_DIR, { recursive: true });
-            }
-
-            this.db = new sqlite3.Database(DB_PATH, (err) => {
-                if (err) {
-                    console.error('[DB] Failed to connect to database:', err.message);
-                    reject(err);
-                } else {
-                    console.log('[DB] Connected to SQLite database.');
-
-                    // Enable WAL mode for better concurrency
-                    this.db.run('PRAGMA journal_mode = WAL;', (err) => {
-                        if (err) console.warn('[DB] Failed to enable WAL mode:', err.message);
-                        else console.log('[DB] WAL mode enabled.');
-
-                        this.createTables().then(() => {
-                            resolve();
-                        }).catch(reject);
-                    });
-                }
-            });
+            this._initWithRetry(resolve, reject);
         });
+    }
+
+    /**
+     * Initialize with retry mechanism
+     */
+    _initWithRetry(resolve, reject) {
+        // Ensure directory exists
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+
+        this.db = new sqlite3.Database(DB_PATH, (err) => {
+            if (err) {
+                console.error(`[DB] Failed to connect to database (attempt ${this.connectionRetries + 1}):`, err.message);
+                
+                if (this.connectionRetries < this.maxRetries) {
+                    this.connectionRetries++;
+                    console.log(`[DB] Retrying connection in ${this.retryDelay}ms...`);
+                    setTimeout(() => {
+                        this._initWithRetry(resolve, reject);
+                    }, this.retryDelay * this.connectionRetries); // Exponential backoff
+                } else {
+                    this.healthStatus = 'error';
+                    reject(new Error(`Failed to connect to database after ${this.maxRetries} attempts: ${err.message}`));
+                }
+            } else {
+                console.log('[DB] Connected to SQLite database.');
+                this.connectionRetries = 0;
+                this.healthStatus = 'healthy';
+                this.lastHealthCheck = new Date();
+
+                // Enable optimizations
+                this._enableOptimizations()
+                    .then(() => this.createTables())
+                    .then(() => {
+                        this.isInitialized = true;
+                        resolve();
+                    })
+                    .catch(reject);
+            }
+        });
+    }
+
+    /**
+     * Enable SQLite optimizations
+     */
+    async _enableOptimizations() {
+        const optimizations = [
+            'PRAGMA journal_mode = WAL;',           // Write-Ahead Logging for better concurrency
+            'PRAGMA synchronous = NORMAL;',         // Balance between safety and performance
+            'PRAGMA cache_size = -64000;',          // 64MB cache
+            'PRAGMA temp_store = MEMORY;',          // Store temp tables in memory
+            'PRAGMA mmap_size = 268435456;',        // 256MB memory-mapped I/O
+            'PRAGMA optimize;'                      // Optimize query planner
+        ];
+
+        for (const pragma of optimizations) {
+            try {
+                await this.run(pragma);
+                console.log(`[DB] Applied: ${pragma.split(' ')[1]}`);
+            } catch (err) {
+                console.warn(`[DB] Failed to apply optimization ${pragma}:`, err.message);
+            }
+        }
+    }
+
+    /**
+     * Health check method
+     */
+    async healthCheck() {
+        try {
+            const startTime = Date.now();
+            await this.get('SELECT 1 as test');
+            const responseTime = Date.now() - startTime;
+            
+            this.healthStatus = 'healthy';
+            this.lastHealthCheck = new Date();
+            
+            return {
+                status: 'healthy',
+                responseTime,
+                lastCheck: this.lastHealthCheck,
+                database: 'SQLite',
+                file: DB_PATH
+            };
+        } catch (error) {
+            this.healthStatus = 'error';
+            this.lastHealthCheck = new Date();
+            
+            console.error('[DB] Health check failed:', error.message);
+            
+            // Attempt reconnection
+            try {
+                await this.init();
+                return await this.healthCheck(); // Retry health check
+            } catch (reconnectError) {
+                return {
+                    status: 'error',
+                    error: error.message,
+                    lastCheck: this.lastHealthCheck,
+                    database: 'SQLite',
+                    file: DB_PATH
+                };
+            }
+        }
+    }
+
+    /**
+     * Get current health status
+     */
+    getHealthStatus() {
+        return {
+            status: this.healthStatus,
+            lastCheck: this.lastHealthCheck,
+            isInitialized: this.isInitialized,
+            database: 'SQLite',
+            file: DB_PATH
+        };
     }
 
     /**
@@ -1364,6 +1474,29 @@ class DatabaseService {
         }
         return result.changes;
     }
+
+    /**
+     * Close database connection gracefully
+     */
+    async close() {
+        return new Promise((resolve) => {
+            if (this.db) {
+                this.db.close((err) => {
+                    if (err) {
+                        console.error('[DB] Error closing database:', err.message);
+                    } else {
+                        console.log('[DB] Database connection closed.');
+                    }
+                    this.db = null;
+                    this.isInitialized = false;
+                    this.healthStatus = 'closed';
+                    resolve();
+                });
+            } else {
+                resolve();
+            }
+        });
+    }
 }
 
-module.exports = new DatabaseService();
+module.exports = new SQLiteAdapter();

@@ -1,26 +1,44 @@
 /**
  * PostgreSQL Database Service using pg driver
- * Replaces SQLite implementation for production deployment
- * 
- * Connection pooling and optimized for Supabase
+ * Optimized for Render PostgreSQL deployment
+ * Implements DatabaseServiceInterface
  */
 
 const { Pool } = require('pg');
+const DatabaseServiceInterface = require('./database.interface');
 
-class DatabaseService {
+class PostgreSQLAdapter extends DatabaseServiceInterface {
     constructor() {
+        super(); // Call parent constructor
         this.pool = null;
+        this.isInitialized = false;
+        this.connectionRetries = 0;
+        this.maxRetries = 3;
+        this.retryDelay = 2000; // 2 seconds
+        this.healthStatus = 'unknown';
+        this.lastHealthCheck = null;
     }
 
     /**
-     * Initialize database connection pool
+     * Initialize database connection pool with retry mechanism
      */
     async init() {
+        if (this.isInitialized && this.pool) {
+            return Promise.resolve();
+        }
+
+        return this._initWithRetry();
+    }
+
+    /**
+     * Initialize with retry mechanism
+     */
+    async _initWithRetry() {
         try {
             const DATABASE_URL = process.env.DATABASE_URL;
             
             if (!DATABASE_URL) {
-                throw new Error('DATABASE_URL environment variable is required');
+                throw new Error('DATABASE_URL environment variable is required for PostgreSQL');
             }
 
             console.log('[DB] Initializing PostgreSQL connection...');
@@ -35,28 +53,23 @@ class DatabaseService {
                 username: url.username
             });
             
-            // Use connection string directly with SSL and IPv4 preference
+            // Create connection pool
             this.pool = new Pool({
                 connectionString: DATABASE_URL,
-                ssl: { rejectUnauthorized: false },
-                max: 20,
-                idleTimeoutMillis: 30000,
-                connectionTimeoutMillis: 15000, // Increased timeout
-                // Force IPv4 to avoid IPv6 connectivity issues on some platforms
-                host: url.hostname.replace(/^db\./, ''), // Remove db. prefix if present
-                port: parseInt(url.port) || 5432,
-                database: url.pathname.slice(1),
-                user: url.username,
-                password: url.password,
+                ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+                max: 20,                    // Maximum connections
+                idleTimeoutMillis: 30000,   // Close idle connections after 30s
+                connectionTimeoutMillis: 15000, // Connection timeout
+                statement_timeout: 30000,   // Query timeout
+                query_timeout: 30000,       // Query timeout
             });
 
             // Test connection with retry logic
-            let retries = 3;
             let connected = false;
             
-            while (retries > 0 && !connected) {
+            while (this.connectionRetries < this.maxRetries && !connected) {
                 try {
-                    console.log(`[DB] Testing connection (attempt ${4 - retries}/3)...`);
+                    console.log(`[DB] Testing connection (attempt ${this.connectionRetries + 1}/${this.maxRetries})...`);
                     const client = await this.pool.connect();
                     const result = await client.query('SELECT NOW() as current_time, version() as pg_version');
                     client.release();
@@ -64,70 +77,197 @@ class DatabaseService {
                     console.log('[DB] ✅ Connected to PostgreSQL database successfully!');
                     console.log('[DB] Current time:', result.rows[0].current_time);
                     console.log('[DB] PostgreSQL version:', result.rows[0].pg_version.split(' ')[0]);
-                    console.log('[DB] Connection pool initialized with max 20 connections.');
                     
                     connected = true;
+                    this.connectionRetries = 0;
+                    this.healthStatus = 'healthy';
+                    this.lastHealthCheck = new Date();
                     
-                    // Test table existence
-                    try {
-                        const tables = await this.all(`
-                            SELECT table_name 
-                            FROM information_schema.tables 
-                            WHERE table_schema = 'public' 
-                            ORDER BY table_name
-                        `);
-                        console.log(`[DB] Found ${tables.length} tables in database`);
-                        if (tables.length > 0) {
-                            console.log('[DB] Available tables:', tables.map(t => t.table_name).join(', '));
-                        }
-                    } catch (tableError) {
-                        console.log('[DB] Could not list tables (this is normal for new databases)');
-                    }
+                    // Create tables if they don't exist
+                    await this.createTables();
+                    
+                    this.isInitialized = true;
                     
                 } catch (error) {
-                    retries--;
+                    this.connectionRetries++;
                     console.log(`[DB] Connection attempt failed: ${error.message}`);
                     
                     if (error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
-                        console.log('[DB] ⚠️  Connection timeout - Supabase project might be paused');
-                        console.log('[DB] 💡 To fix: Go to Supabase Dashboard → Select project → Click "Restore" if paused');
+                        console.log('[DB] ⚠️  Connection timeout - Database might be starting up');
                     } else if (error.code === 'ENETUNREACH' || error.message.includes('ENETUNREACH')) {
-                        console.log('[DB] ⚠️  Network unreachable - Supabase project is likely paused or inactive');
-                        console.log('[DB] 💡 SOLUTION: Go to https://supabase.com/dashboard → Select your project → Click "Restore"');
-                        console.log('[DB] 💡 Your project auto-pauses after 1 week of inactivity on the free tier');
+                        console.log('[DB] ⚠️  Network unreachable - Check database availability');
                     }
                     
-                    if (retries > 0) {
-                        console.log(`[DB] Retrying in 2 seconds... (${retries} attempts left)`);
-                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    if (this.connectionRetries < this.maxRetries) {
+                        console.log(`[DB] Retrying in ${this.retryDelay}ms... (${this.maxRetries - this.connectionRetries} attempts left)`);
+                        await new Promise(resolve => setTimeout(resolve, this.retryDelay * this.connectionRetries)); // Exponential backoff
                     }
                 }
             }
             
             if (!connected) {
-                throw new Error('Failed to connect to database after 3 attempts. Please check if Supabase project is active.');
+                this.healthStatus = 'error';
+                throw new Error(`Failed to connect to PostgreSQL after ${this.maxRetries} attempts`);
             }
 
-            console.log('[DB] Database initialized successfully.');
+            console.log('[DB] PostgreSQL database initialized successfully.');
+            
         } catch (error) {
-            console.error('[DB] Failed to initialize database:', error.message);
-            
-            // Provide helpful error messages based on error type
-            if (error.code === 'ETIMEDOUT' || error.message.includes('timeout')) {
-                console.error('[DB] 🔧 SOLUTION: Your Supabase project might be paused (free tier auto-pauses after 1 week)');
-                console.error('[DB] 🔧 Go to https://supabase.com/dashboard → Select your project → Click "Restore"');
-            } else if (error.code === 'ENETUNREACH' || error.message.includes('ENETUNREACH')) {
-                console.error('[DB] 🔧 SOLUTION: Supabase project is paused or inactive');
-                console.error('[DB] 🔧 Go to https://supabase.com/dashboard → Select your project → Click "Restore"');
-                console.error('[DB] 🔧 Free tier projects auto-pause after 1 week of inactivity');
-            } else if (error.message.includes('authentication failed')) {
-                console.error('[DB] 🔧 SOLUTION: Check your DATABASE_URL credentials');
-            } else if (error.message.includes('does not exist')) {
-                console.error('[DB] 🔧 SOLUTION: Database or table does not exist - run migration first');
-            }
-            
+            console.error('[DB] Failed to initialize PostgreSQL database:', error.message);
+            this.healthStatus = 'error';
             throw error;
         }
+    }
+
+    /**
+     * Create tables if they don't exist (PostgreSQL version)
+     */
+    async createTables() {
+        console.log('[DB] Creating tables if they don\'t exist...');
+        
+        // Customers table
+        await this.run(`
+            CREATE TABLE IF NOT EXISTS customers (
+                id SERIAL PRIMARY KEY,
+                name TEXT,
+                year INTEGER NOT NULL,
+                month INTEGER NOT NULL,
+                day INTEGER NOT NULL,
+                hour INTEGER DEFAULT 12,
+                minute INTEGER DEFAULT 0,
+                gender TEXT DEFAULT 'Nam',
+                calendar TEXT DEFAULT 'solar',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // Consultations table
+        await this.run(`
+            CREATE TABLE IF NOT EXISTS consultations (
+                id SERIAL PRIMARY KEY,
+                customer_id INTEGER,
+                theme_id TEXT,
+                question_id TEXT NOT NULL,
+                question_text TEXT,
+                answer TEXT,
+                use_ai BOOLEAN DEFAULT true,
+                credits_used INTEGER DEFAULT 0,
+                user_id INTEGER,
+                persona TEXT DEFAULT 'huyen_co',
+                follow_ups TEXT,
+                person1_data TEXT,
+                person2_data TEXT,
+                metadata TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (customer_id) REFERENCES customers(id)
+            )
+        `);
+
+        // Users table
+        await this.run(`
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                name TEXT,
+                credits INTEGER DEFAULT 100,
+                is_admin BOOLEAN DEFAULT false,
+                bazi_data TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMP
+            )
+        `);
+
+        // Sessions table
+        await this.run(`
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                user_data TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        `);
+
+        // Access logs table
+        await this.run(`
+            CREATE TABLE IF NOT EXISTS access_logs (
+                id SERIAL PRIMARY KEY,
+                ip TEXT,
+                method TEXT,
+                path TEXT,
+                status_code INTEGER,
+                user_agent TEXT,
+                user_id INTEGER,
+                user_email TEXT,
+                response_time INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // Create indexes
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_consultations_customer ON consultations(customer_id)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_consultations_user ON consultations(user_id)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_customers_birth ON customers(year, month, day)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_access_logs_created ON access_logs(created_at)`);
+
+        console.log('[DB] Tables and indexes created/verified.');
+    }
+
+    /**
+     * Health check method
+     */
+    async healthCheck() {
+        try {
+            const startTime = Date.now();
+            const result = await this.get('SELECT 1 as test, NOW() as current_time');
+            const responseTime = Date.now() - startTime;
+            
+            this.healthStatus = 'healthy';
+            this.lastHealthCheck = new Date();
+            
+            return {
+                status: 'healthy',
+                responseTime,
+                lastCheck: this.lastHealthCheck,
+                database: 'PostgreSQL',
+                currentTime: result.current_time
+            };
+        } catch (error) {
+            this.healthStatus = 'error';
+            this.lastHealthCheck = new Date();
+            
+            console.error('[DB] Health check failed:', error.message);
+            
+            // Attempt reconnection
+            try {
+                await this.init();
+                return await this.healthCheck(); // Retry health check
+            } catch (reconnectError) {
+                return {
+                    status: 'error',
+                    error: error.message,
+                    lastCheck: this.lastHealthCheck,
+                    database: 'PostgreSQL'
+                };
+            }
+        }
+    }
+
+    /**
+     * Get current health status
+     */
+    getHealthStatus() {
+        return {
+            status: this.healthStatus,
+            lastCheck: this.lastHealthCheck,
+            isInitialized: this.isInitialized,
+            database: 'PostgreSQL'
+        };
     }
 
     /**
@@ -533,6 +673,25 @@ class DatabaseService {
         }
         return result.changes;
     }
+
+    /**
+     * Close database connection pool gracefully
+     */
+    async close() {
+        return new Promise((resolve) => {
+            if (this.pool) {
+                this.pool.end(() => {
+                    console.log('[DB] PostgreSQL connection pool closed.');
+                    this.pool = null;
+                    this.isInitialized = false;
+                    this.healthStatus = 'closed';
+                    resolve();
+                });
+            } else {
+                resolve();
+            }
+        });
+    }
 }
 
-module.exports = new DatabaseService();
+module.exports = new PostgreSQLAdapter();
