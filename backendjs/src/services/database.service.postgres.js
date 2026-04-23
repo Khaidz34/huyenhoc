@@ -191,6 +191,111 @@ class PostgreSQLAdapter extends DatabaseServiceInterface {
             )
         `);
 
+        // Credit transactions table
+        await this.run(`
+            CREATE TABLE IF NOT EXISTS credit_transactions (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                amount INTEGER NOT NULL,
+                type TEXT NOT NULL,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        `);
+
+        // Credit requests table
+        await this.run(`
+            CREATE TABLE IF NOT EXISTS credit_requests (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                amount INTEGER DEFAULT 100,
+                status TEXT DEFAULT 'pending',
+                admin_note TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                processed_at TIMESTAMP,
+                processed_by INTEGER,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        `);
+
+        // Question categories table
+        await this.run(`
+            CREATE TABLE IF NOT EXISTS question_categories (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                icon TEXT DEFAULT '📋',
+                order_index INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT true,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // Custom questions table
+        await this.run(`
+            CREATE TABLE IF NOT EXISTS custom_questions (
+                id SERIAL PRIMARY KEY,
+                category_id INTEGER,
+                text TEXT NOT NULL,
+                is_active BOOLEAN DEFAULT true,
+                order_index INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (category_id) REFERENCES question_categories(id)
+            )
+        `);
+
+        // Article categories table
+        await this.run(`
+            CREATE TABLE IF NOT EXISTS article_categories (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                slug TEXT UNIQUE NOT NULL,
+                description TEXT,
+                order_index INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT true,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // Articles table
+        await this.run(`
+            CREATE TABLE IF NOT EXISTS articles (
+                id SERIAL PRIMARY KEY,
+                title TEXT NOT NULL,
+                slug TEXT UNIQUE NOT NULL,
+                excerpt TEXT,
+                content TEXT NOT NULL,
+                thumbnail TEXT,
+                category_id INTEGER,
+                author TEXT DEFAULT 'Huyền Cơ Bát Tự',
+                views INTEGER DEFAULT 0,
+                is_published BOOLEAN DEFAULT true,
+                is_featured BOOLEAN DEFAULT false,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (category_id) REFERENCES article_categories(id)
+            )
+        `);
+
+        // Que history table
+        await this.run(`
+            CREATE TABLE IF NOT EXISTS que_history (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER,
+                customer_id INTEGER,
+                context_id TEXT,
+                bazi_params TEXT,
+                que_type TEXT NOT NULL,
+                period_key TEXT NOT NULL,
+                gua_number INTEGER,
+                gua_name TEXT,
+                gua_data TEXT,
+                user_note TEXT,
+                is_verified BOOLEAN DEFAULT false,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
         // Access logs table
         await this.run(`
             CREATE TABLE IF NOT EXISTS access_logs (
@@ -213,9 +318,116 @@ class PostgreSQLAdapter extends DatabaseServiceInterface {
         await this.run(`CREATE INDEX IF NOT EXISTS idx_customers_birth ON customers(year, month, day)`);
         await this.run(`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`);
         await this.run(`CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`);
         await this.run(`CREATE INDEX IF NOT EXISTS idx_access_logs_created ON access_logs(created_at)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_access_logs_ip ON access_logs(ip)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_questions_category ON custom_questions(category_id)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_credit_trans_user ON credit_transactions(user_id)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_credit_requests_status ON credit_requests(status)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_articles_slug ON articles(slug)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_articles_category ON articles(category_id)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(is_published)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_article_categories_slug ON article_categories(slug)`);
+        await this.run(`CREATE INDEX IF NOT EXISTS idx_que_history_lookup ON que_history(user_id, que_type, period_key, context_id)`);
 
-        console.log('[DB] Tables and indexes created/verified.');
+        console.log('[DB] All tables and indexes created/verified.');
+
+        // Seed default data
+        await this.initDefaultAdmins();
+        await this.initDefaultCategories();
+        await this.initDefaultArticleCategories();
+    }
+
+    async initDefaultAdmins() {
+        const admins = [
+            { email: 'admin@huyencobattu.vn', hash: '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', name: 'Administrator' },
+            { email: 'admin@admin.com', hash: '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', name: 'System Admin' }
+        ];
+        for (const admin of admins) {
+            const email = admin.email.toLowerCase().trim();
+            const exists = await this.get(`SELECT id FROM users WHERE LOWER(email) = $1`, [email]);
+            if (!exists) {
+                console.log(`[DB] Creating admin: ${email}`);
+                await this.run(`
+                    INSERT INTO users (email, password_hash, name, credits, is_admin)
+                    VALUES ($1, $2, $3, 9999, true)
+                `, [email, admin.hash, admin.name]);
+            }
+        }
+    }
+
+    async initDefaultCategories() {
+        const row = await this.get(`SELECT COUNT(*) as count FROM question_categories`);
+        if (parseInt(row?.count || 0) > 0) return;
+
+        console.log('[DB] Initializing default question categories...');
+        const defaultCategories = [
+            { name: 'Công danh', icon: '🏛️', order_index: 1, mapKey: 'career' },
+            { name: 'Tình duyên', icon: '❤️', order_index: 2, mapKey: 'love' },
+            { name: 'Tài lộc', icon: '💰', order_index: 3, mapKey: 'wealth' },
+            { name: 'Sức khỏe', icon: '🏥', order_index: 4, mapKey: 'health' },
+            { name: 'Con cái', icon: '👶', order_index: 5, mapKey: 'children' },
+            { name: 'Đồng nghiệp', icon: '👥', order_index: 6, mapKey: 'colleagues' },
+            { name: 'Hợp tác', icon: '🤝', order_index: 7, mapKey: 'partnership' },
+            { name: 'Tai họa', icon: '🌪️', order_index: 8, mapKey: 'misfortune' }
+        ];
+        const categoryIds = {};
+        for (const cat of defaultCategories) {
+            const result = await this.run(`
+                INSERT INTO question_categories (name, icon, order_index, is_active)
+                VALUES ($1, $2, $3, true) RETURNING id
+            `, [cat.name, cat.icon, cat.order_index]);
+            categoryIds[cat.mapKey] = result.id;
+        }
+        console.log('[DB] Default categories initialized');
+        await this.initDefaultQuestions(categoryIds);
+    }
+
+    async initDefaultQuestions(categoryIds) {
+        const row = await this.get(`SELECT COUNT(*) as count FROM custom_questions`);
+        if (parseInt(row?.count || 0) > 0) return;
+        console.log('[DB] Initializing default questions...');
+        try {
+            const { QUESTIONS } = require('../bazi/questions/data');
+            let totalQuestions = 0;
+            for (const [themeKey, questions] of Object.entries(QUESTIONS)) {
+                const categoryId = categoryIds[themeKey];
+                if (!categoryId) continue;
+                let orderIndex = 1;
+                for (const q of questions) {
+                    await this.run(`
+                        INSERT INTO custom_questions (category_id, text, order_index, is_active)
+                        VALUES ($1, $2, $3, true)
+                    `, [categoryId, q.text || '', orderIndex]);
+                    orderIndex++;
+                    totalQuestions++;
+                }
+            }
+            console.log(`[DB] Initialized ${totalQuestions} default questions`);
+        } catch (error) {
+            console.error('[DB] Error initializing questions:', error.message);
+        }
+    }
+
+    async initDefaultArticleCategories() {
+        const row = await this.get(`SELECT COUNT(*) as count FROM article_categories`);
+        if (parseInt(row?.count || 0) > 0) return;
+        console.log('[DB] Initializing default article categories...');
+        const categories = [
+            { name: 'Kiến Thức Bát Tự', slug: 'kien-thuc-bat-tu', description: 'Tổng hợp kiến thức về Bát Tự', order_index: 1 },
+            { name: 'Ngũ Hành', slug: 'ngu-hanh', description: 'Phân tích Ngũ Hành', order_index: 2 },
+            { name: 'Can Chi', slug: 'can-chi', description: 'Thiên Can Địa Chi', order_index: 3 },
+            { name: 'Vận Hạn', slug: 'van-han', description: 'Đại Vận Lưu Niên', order_index: 4 },
+            { name: 'Phong Thủy', slug: 'phong-thuy', description: 'Phong thủy ứng dụng', order_index: 5 }
+        ];
+        for (const cat of categories) {
+            await this.run(`
+                INSERT INTO article_categories (name, slug, description, order_index, is_active)
+                VALUES ($1, $2, $3, $4, true)
+                ON CONFLICT (slug) DO NOTHING
+            `, [cat.name, cat.slug, cat.description, cat.order_index]);
+        }
+        console.log('[DB] Default article categories initialized');
     }
 
     /**
