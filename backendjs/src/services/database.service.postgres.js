@@ -632,7 +632,7 @@ class PostgreSQLAdapter extends DatabaseServiceInterface {
             RETURNING id
         `, [
             customerId, themeId || '', questionId, questionText || '', answerJson || '',
-            useAI ? 1 : 0, creditsUsed, userId, persona, followUpsJson,
+            useAI ? true : false, creditsUsed, userId, persona, followUpsJson,
             person1Data, person2Data, metadata
         ]);
 
@@ -679,7 +679,7 @@ class PostgreSQLAdapter extends DatabaseServiceInterface {
     async getStats() {
         const totalCustomers = await this.get(`SELECT COUNT(*) as count FROM customers`);
         const totalConsultations = await this.get(`SELECT COUNT(*) as count FROM consultations`);
-        const aiConsultations = await this.get(`SELECT COUNT(*) as count FROM consultations WHERE use_ai = 1`);
+        const aiConsultations = await this.get(`SELECT COUNT(*) as count FROM consultations WHERE use_ai = true`);
         const todayConsultations = await this.get(`SELECT COUNT(*) as count FROM consultations WHERE DATE(created_at) = CURRENT_DATE`);
 
         return {
@@ -1056,7 +1056,7 @@ class PostgreSQLAdapter extends DatabaseServiceInterface {
     async updateCategory(id, data) {
         const { name, icon, order_index, is_active } = data;
         await this.run(`UPDATE question_categories SET name=$1, icon=$2, order_index=$3, is_active=$4 WHERE id=$5`,
-            [name, icon || '📋', order_index || 0, is_active ? 1 : 0, id]);
+            [name, icon || '📋', order_index || 0, is_active ? true : false, id]);
     }
 
 
@@ -1080,7 +1080,7 @@ class PostgreSQLAdapter extends DatabaseServiceInterface {
     async updateQuestion(id, data) {
         const { category_id, text, order_index, is_active } = data;
         await this.run(`UPDATE custom_questions SET category_id=$1, text=$2, order_index=$3, is_active=$4 WHERE id=$5`,
-            [category_id, text, order_index || 0, is_active ? 1 : 0, id]);
+            [category_id, text, order_index || 0, is_active ? true : false, id]);
     }
 
 
@@ -1241,7 +1241,7 @@ class PostgreSQLAdapter extends DatabaseServiceInterface {
 
 
     async getArticleCategories() {
-        return this.all(`SELECT * FROM article_categories WHERE is_active = 1 ORDER BY order_index ASC`);
+        return this.all(`SELECT * FROM article_categories WHERE is_active = true ORDER BY order_index ASC`);
     }
 
 
@@ -1335,8 +1335,8 @@ class PostgreSQLAdapter extends DatabaseServiceInterface {
             data.thumbnail || '',
             data.category_id || null,
             data.author || 'Huyền Cơ Bát Tự',
-            data.is_published !== undefined ? (data.is_published ? 1 : 0) : 1,
-            data.is_featured ? 1 : 0
+            data.is_published !== undefined ? (data.is_published ? true : false) : 1,
+            data.is_featured ? true : false
         ]);
         return result.lastID;
     }
@@ -1354,8 +1354,8 @@ class PostgreSQLAdapter extends DatabaseServiceInterface {
         if (data.thumbnail !== undefined) { fields.push('thumbnail = ?'); params.push(data.thumbnail); }
         if (data.category_id !== undefined) { fields.push('category_id = ?'); params.push(data.category_id); }
         if (data.author !== undefined) { fields.push('author = ?'); params.push(data.author); }
-        if (data.is_published !== undefined) { fields.push('is_published = ?'); params.push(data.is_published ? 1 : 0); }
-        if (data.is_featured !== undefined) { fields.push('is_featured = ?'); params.push(data.is_featured ? 1 : 0); }
+        if (data.is_published !== undefined) { fields.push('is_published = ?'); params.push(data.is_published ? true : false); }
+        if (data.is_featured !== undefined) { fields.push('is_featured = ?'); params.push(data.is_featured ? true : false); }
 
         fields.push('updated_at = CURRENT_TIMESTAMP');
         params.push(id);
