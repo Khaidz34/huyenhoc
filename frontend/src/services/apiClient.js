@@ -1,9 +1,11 @@
-const BASE_URL = '/api';
+import API_CONFIG from '../config/api.js';
+
+const BASE_URL = API_CONFIG.BASE_URL;
 
 export const apiClient = {
     get: async (endpoint, params = {}) => {
-        // Use window.location.origin to ensure relative path matches current page
-        const url = new URL(BASE_URL + endpoint, window.location.origin);
+        // Build full URL using BASE_URL from config
+        const url = new URL(endpoint, BASE_URL);
 
         // Append query params
         Object.keys(params).forEach(key => {
@@ -27,7 +29,7 @@ export const apiClient = {
     },
 
     post: async (endpoint, data = {}) => {
-        const url = new URL(BASE_URL + endpoint, window.location.origin);
+        const url = new URL(endpoint, BASE_URL);
 
         console.log(`[API] Posting: ${url.toString()}`);
 
@@ -50,7 +52,7 @@ export const apiClient = {
     selectDates: (data) => apiClient.get('/select-dates', data),
     matching: (data) => apiClient.post('/matching', data),
     matchingAI: (data, token) => {
-        const url = new URL(BASE_URL + '/matching/ai', window.location.origin);
+        const url = new URL('/matching/ai', BASE_URL);
         return fetch(url.toString(), {
             method: 'POST',
             headers: {
@@ -79,7 +81,7 @@ export const apiClient = {
         });
     },
     askAI: (data, token) => {
-        const url = new URL(BASE_URL + '/consultant/ask', window.location.origin);
+        const url = new URL('/consultant/ask', BASE_URL);
         return fetch(url.toString(), {
             method: 'POST',
             headers: {

@@ -16,24 +16,8 @@ router.get('/analyze', async (req, res) => {
             return res.status(400).json({ error: 'Missing required parameters: year, month, day' });
         }
 
-        // Save customer to database (every request = new customer)
-        let customerId = null;
-        try {
-            customerId = await dbService.createNewCustomer({
-                name: name || 'Mệnh chủ',
-                year: parseInt(year),
-                month: parseInt(month),
-                day: parseInt(day),
-                hour: parseInt(hour),
-                minute: parseInt(minute),
-                gender,
-                calendar
-            });
-            console.log(`[DB] New customer #${customerId} created`);
-        } catch (dbError) {
-            console.error('[DB] Failed to save customer:', dbError.message);
-        }
-
+        // TASK 3.1: Decouple database save from analysis flow
+        // Perform analysis FIRST, before attempting database save
         const result = await baziService.analyzeComplete({
             year: parseInt(year),
             month: parseInt(month),
@@ -45,8 +29,56 @@ router.get('/analyze', async (req, res) => {
             name
         });
 
-        // Include customerId in response
+        // TASK 3.2 & 3.3: Add timeout protection and improved error handling
+        // Save customer to database with timeout protection (non-blocking)
+        let customerId = null;
+        let databaseSaveSuccess = false;
+        
+        try {
+            // Create timeout promise (5 seconds)
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Database save timeout after 5 seconds')), 5000);
+            });
+
+            // Race between database save and timeout
+            const savePromise = dbService.createNewCustomer({
+                name: name || 'Mệnh chủ',
+                year: parseInt(year),
+                month: parseInt(month),
+                day: parseInt(day),
+                hour: parseInt(hour),
+                minute: parseInt(minute),
+                gender,
+                calendar
+            });
+
+            customerId = await Promise.race([savePromise, timeoutPromise]);
+            databaseSaveSuccess = true;
+            console.log(`[DB] New customer #${customerId} created`);
+        } catch (dbError) {
+            // TASK 3.3: Enhanced error logging
+            console.error('[DB] Failed to save customer:', {
+                error: dbError.message,
+                type: dbError.name,
+                stack: dbError.stack,
+                timestamp: new Date().toISOString()
+            });
+            
+            // Check database health status for additional context
+            try {
+                const healthStatus = await dbService.healthCheck?.();
+                if (healthStatus) {
+                    console.error('[DB] Health status:', healthStatus);
+                }
+            } catch (healthError) {
+                console.error('[DB] Health check failed:', healthError.message);
+            }
+        }
+
+        // TASK 3.4: Ensure analysis results always returned with proper response format
+        // Include customerId (null if save failed) and database save status flag
         result.customerId = customerId;
+        result.databaseSaveSuccess = databaseSaveSuccess;
 
         res.json(result);
     } catch (error) {
