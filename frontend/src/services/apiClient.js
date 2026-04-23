@@ -4,8 +4,11 @@ const BASE_URL = API_CONFIG.BASE_URL;
 
 export const apiClient = {
     get: async (endpoint, params = {}) => {
-        // Build full URL using BASE_URL from config
-        const url = new URL(endpoint, BASE_URL);
+        // Remove leading slash from endpoint if present
+        const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+        // Build full URL by concatenating BASE_URL and endpoint
+        const fullUrl = `${BASE_URL}/${cleanEndpoint}`;
+        const url = new URL(fullUrl);
 
         // Append query params
         Object.keys(params).forEach(key => {
@@ -29,7 +32,11 @@ export const apiClient = {
     },
 
     post: async (endpoint, data = {}) => {
-        const url = new URL(endpoint, BASE_URL);
+        // Remove leading slash from endpoint if present
+        const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+        // Build full URL by concatenating BASE_URL and endpoint
+        const fullUrl = `${BASE_URL}/${cleanEndpoint}`;
+        const url = new URL(fullUrl);
 
         console.log(`[API] Posting: ${url.toString()}`);
 
@@ -52,8 +59,11 @@ export const apiClient = {
     selectDates: (data) => apiClient.get('/select-dates', data),
     matching: (data) => apiClient.post('/matching', data),
     matchingAI: (data, token) => {
-        const url = new URL('/matching/ai', BASE_URL);
-        return fetch(url.toString(), {
+        // Remove leading slash from endpoint if present
+        const cleanEndpoint = '/matching/ai'.startsWith('/') ? '/matching/ai'.slice(1) : '/matching/ai';
+        const fullUrl = `${BASE_URL}/${cleanEndpoint}`;
+        
+        return fetch(fullUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -81,8 +91,11 @@ export const apiClient = {
         });
     },
     askAI: (data, token) => {
-        const url = new URL('/consultant/ask', BASE_URL);
-        return fetch(url.toString(), {
+        // Remove leading slash from endpoint if present
+        const cleanEndpoint = '/consultant/ask'.startsWith('/') ? '/consultant/ask'.slice(1) : '/consultant/ask';
+        const fullUrl = `${BASE_URL}/${cleanEndpoint}`;
+        
+        return fetch(fullUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
