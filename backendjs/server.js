@@ -1,5 +1,13 @@
 require('dotenv').config();
 process.env.TZ = 'Asia/Ho_Chi_Minh';
+
+// ============================================================
+// FORCE SQLite — ignore DATABASE_URL set in any dashboard
+// SQLite with persistent disk is the deployment target.
+// To switch to PostgreSQL, remove this line AND set USE_SQLITE=false
+// ============================================================
+process.env.USE_SQLITE = 'true';
+delete process.env.DATABASE_URL; // Prevent postgres adapter from being selected
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -14,10 +22,9 @@ const articlesRoutes = require('./src/routes/articles.routes');
 const queRoutes = require('./src/routes/que.routes');
 // const dailyRoutes = require('./src/routes/daily.routes');
 
-// Use PostgreSQL in production, SQLite in development
-const dbService = process.env.NODE_ENV === 'production'
-    ? require('./src/services/database.service.postgres')
-    : require('./src/services/database.service');
+// Use Database Factory for environment-based selection
+const DatabaseFactory = require('./src/services/database.factory');
+const dbService = DatabaseFactory.createService();
 
 const app = express();
 const PORT = process.env.PORT || 8888;
@@ -111,6 +118,57 @@ app.get('/', (req, res) => {
         status: 'running',
         docs: '/api/docs'
     });
+});
+
+// Enhanced health check with database status
+app.get('/health', async (req, res) => {
+    try {
+        const dbHealth = await dbService.healthCheck();
+        const systemHealth = {
+            status: dbHealth.status === 'healthy' ? 'ok' : 'error',
+            database: dbHealth,
+            uptime: process.uptime(),
+            memory: process.memoryUsage(),
+            timestamp: new Date(),
+            environment: process.env.NODE_ENV || 'development'
+        };
+        
+        res.status(dbHealth.status === 'healthy' ? 200 : 503)
+           .json(systemHealth);
+    } catch (error) {
+        res.status(503).json({
+            status: 'error',
+            error: error.message,
+            timestamp: new Date(),
+            environment: process.env.NODE_ENV || 'development'
+        });
+    }
+});
+
+// Metrics endpoint for monitoring
+app.get('/metrics', async (req, res) => {
+    try {
+        const dbHealth = await dbService.healthCheck();
+        const stats = await dbService.getStats();
+        
+        const metrics = {
+            database: dbHealth,
+            system: {
+                uptime: process.uptime(),
+                memory: process.memoryUsage(),
+                cpu: process.cpuUsage()
+            },
+            application: stats,
+            environment: process.env.NODE_ENV || 'development'
+        };
+        
+        res.json(metrics);
+    } catch (error) {
+        res.status(500).json({
+            error: error.message,
+            timestamp: new Date()
+        });
+    }
 });
 
 // API Documentation
