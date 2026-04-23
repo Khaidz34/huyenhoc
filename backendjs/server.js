@@ -1,13 +1,5 @@
 require('dotenv').config();
 process.env.TZ = 'Asia/Ho_Chi_Minh';
-
-// ============================================================
-// FORCE SQLite — ignore DATABASE_URL set in any dashboard
-// SQLite with persistent disk is the deployment target.
-// To switch to PostgreSQL, remove this line AND set USE_SQLITE=false
-// ============================================================
-process.env.USE_SQLITE = 'true';
-delete process.env.DATABASE_URL; // Prevent postgres adapter from being selected
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
