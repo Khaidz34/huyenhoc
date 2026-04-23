@@ -1,9 +1,9 @@
 services:
-  # Backend Web Service
+  # Backend Web Service (FREE TIER)
   - type: web
     name: huyenhoc
     runtime: node
-    plan: standard
+    plan: free  # FREE TIER - sleeps after 15min inactive
     
     # Build configuration
     buildCommand: cd backendjs && npm install
@@ -16,34 +16,29 @@ services:
       - key: TZ
         value: Asia/Ho_Chi_Minh
       - key: PORT
-        value: 8888
-      - key: DATABASE_URL
-        sync: false  # Set manually in Render dashboard
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_ANON_KEY
-        sync: false
+        value: 10000  # Render free tier uses port 10000
+      - key: USE_SQLITE
+        value: "true"  # Force SQLite — do NOT set DATABASE_URL
       - key: OPENROUTER_API_KEY
-        sync: false
+        sync: false  # Set manually in Render dashboard
       - key: CORS_ORIGIN
         value: https://thuatso.onrender.com,http://localhost:3005
       - key: LOG_LEVEL
         value: info
+      - key: JWT_SECRET
+        generateValue: true  # Auto-generate a secure JWT secret
     
     # Health check configuration
-    healthCheckPath: /
+    healthCheckPath: /health
     healthCheckInterval: 30
     
-    # Scaling configuration
-    numInstances: 1
-    
-    # Disk configuration (if needed)
+    # Persistent disk for SQLite database (FREE 1GB)
     disk:
-      name: bazi-data
-      mountPath: /data
+      name: bazi-sqlite-data
+      mountPath: /opt/render/project/src/backendjs/data
       sizeGB: 1
 
-  # Frontend Static Site
+  # Frontend Static Site (FREE)
   - type: static_site
     name: thuatso
     
@@ -56,7 +51,7 @@ services:
       - key: VITE_API_URL
         value: https://huyenhoc.onrender.com
       - key: VITE_APP_VERSION
-        value: 2.1
+        value: "2.1"
       - key: VITE_ENABLE_AI_CONSULTANT
         value: "true"
       - key: VITE_ENABLE_MATCHING
@@ -66,7 +61,7 @@ services:
       - key: VITE_ENABLE_ADMIN_PANEL
         value: "true"
     
-    # Routes configuration for SPA
+    # Routes configuration for React SPA (prevents 404 on refresh)
     routes:
       - path: /*
         destination: /index.html
@@ -86,3 +81,5 @@ services:
         headers:
           - key: Cache-Control
             value: public, max-age=0, must-revalidate
+
+# SQLite with persistent disk — no external database needed
