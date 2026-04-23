@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const baziService = require('../services/bazi.service');
-const dbService = require('../services/database.service');
+const dbService = require('../services/db');
 const ganzhi = require('../bazi/ganzhi');
 
 /**

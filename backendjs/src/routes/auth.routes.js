@@ -6,7 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
-const dbService = require('../services/database.service');
+const dbService = require('../services/db');
 
 // Simple hash function (for demo - use bcrypt in production)
 const hashPassword = (password) => {

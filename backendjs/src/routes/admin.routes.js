@@ -5,7 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
-const dbService = require('../services/database.service');
+const dbService = require('../services/db');
 const { authMiddleware, adminMiddleware } = require('./auth.routes');
 
 // Apply protection to all admin routes

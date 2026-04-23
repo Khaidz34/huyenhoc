@@ -5,7 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
-const db = require('../services/database.service');
+const db = require('../services/db');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
 // ========== PUBLIC ENDPOINTS ==========
