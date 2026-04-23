@@ -19,7 +19,7 @@ router.get('/analyze', async (req, res) => {
         // Save customer to database (every request = new customer)
         let customerId = null;
         try {
-            customerId = dbService.createNewCustomer({
+            customerId = await dbService.createNewCustomer({
                 name: name || 'Mệnh chủ',
                 year: parseInt(year),
                 month: parseInt(month),
